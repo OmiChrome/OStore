@@ -57,6 +57,7 @@ A local build needs Java 21, `jq`, `zip` and `curl`. Run `python3 scripts/ostore
 - `plan` writes `out/plan.json` (the patch tag of each app) and is the input to `build`.
 - `build-all.sh` releases each app right after its build and starts `pages.yml` each time. Pages runs queue (`cancel-in-progress: false`), and deploy is retried because the artifact sometimes isn't listed yet.
 - `release` uploads the APK, `meta.json` and `build-log.txt` as a GitHub release tagged `<id>-v<version>-<patches>-<stamp>`. `cleanup` relies on the `<id>-v<digit>` prefix of that tag.
+- An app whose original APK is missing is recorded in `state/waiting.json` together with the inbox file names at that time. `plan` skips it until the `stock-apks` inbox changes, or until it's requested with `--only`/`--force`. `record` clears it.
 - `record` updates `state/built.json`. The next `plan` compares its `patches_tag` and `config_hash` to decide what to rebuild.
 - `catalog` turns all releases' `meta.json` files into `site/data.json`. It also writes `site/lookup.json`, a compact app and bundle index from awesome-morphe's `bundles.json` that the Add page preview uses.
 - **Releases are the source of truth for the store.** `site/data.json` and `site/lookup.json` are generated and ignored by git.

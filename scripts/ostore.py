@@ -174,6 +174,7 @@ def latest_stable(repo):
 def cmd_plan(a):
     apps = load_apps()
     built = read_json(STATE_DIR / "built.json", {})
+    waiting = read_json(STATE_DIR / "waiting.json", {})
     only = {x for x in (a.only or "").replace(",", " ").split() if x}
     todo, reasons, cache = [], {}, {}
     for app_id, cfg in apps.items():
@@ -190,6 +191,10 @@ def cmd_plan(a):
             todo.append(app_id)
             continue
         prev = built.get(app_id, {})
+        wait = waiting.get(app_id)
+        if wait and not (a.force or only) and inbox_names(cfg["package"]) == wait.get("inbox"):
+            log(f"skip {app_id}: waiting for the original APK to be uploaded to the {INBOX_TAG} release")
+            continue
         if a.force or only:
             why = "requested"
         elif prev.get("patches_tag") != cache[src]["tag"]:
@@ -368,6 +373,14 @@ def apk_identity(path):
             return tuple(manifest_info(tmp)[k] for k in ("package", "versionName"))
         finally:
             tmp.unlink()
+
+
+def inbox_names(pkg):
+    try:
+        rel = api(f"repos/{repo_slug()}/releases/tags/{INBOX_TAG}")
+    except Exception:
+        return []
+    return sorted(x["name"] for x in rel.get("assets", []) if x["name"].startswith(pkg))
 
 
 def inbox_restore(engine, pkg):
@@ -671,6 +684,11 @@ def cmd_build(a):
             rc, apks = run_engine(engine, conf.name, log_path)
         if not apks:
             hint = missing_stock_hint(cfg, log_path.read_text(errors="replace"))
+            if hint:
+                w = read_json(STATE_DIR / "waiting.json", {})
+                w[a.app] = {"package": cfg["package"], "inbox": inbox_names(cfg["package"]),
+                            "since": dt.datetime.now(dt.UTC).strftime("%Y-%m-%d")}
+                write_json(STATE_DIR / "waiting.json", w)
             fail("download-original-apk" if hint else "patch",
                  (hint.strip() if hint else f"engine produced no APK (exit {rc}); see log tail"))
         apk = apks[0]
@@ -818,6 +836,9 @@ def cmd_record(a):
                                          "built_at", "release_tag", "kind")}
     built[a.app]["patches_tag"] = m["patches_version"]
     write_json(STATE_DIR / "built.json", built)
+    w = read_json(STATE_DIR / "waiting.json", {})
+    if w.pop(a.app, None) is not None:
+        write_json(STATE_DIR / "waiting.json", w)
 
 
 # ----------------------------------------------------------------- catalog
@@ -1060,7 +1081,10 @@ def cmd_health(a):
                 continue
             url = app["latest"]["download_url"]
             try:
-                http(url, method="HEAD", timeout=60)
+                # First bytes only (HEAD is unreliable on GitHub's file storage); an APK is a zip: "PK".
+                head = http(url, headers={"Range": "bytes=0-3"}, timeout=60)
+                if not head.startswith(b"PK"):
+                    problems.append(f"{app['name']}: download is not an APK: {url}")
             except Exception as e:
                 problems.append(f"{app['name']}: download link broken ({e}): {url}")
     try:
