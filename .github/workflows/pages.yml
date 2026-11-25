@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["site/**", "scripts/ostore.py"]
+    paths: ["site/**", "scripts/ostore.py", ".github/workflows/pages.yml"]
   schedule:
     - cron: "41 5 * * 0" # weekly refresh of download counts
 
