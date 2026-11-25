@@ -39,6 +39,14 @@ jobs:
           echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           if [ "$HEAD_SHA" = "$PIN" ]; then echo "same=true" >> "$GITHUB_OUTPUT"; echo "Already on the newest engine."; fi
 
+      - name: Restore original APKs from cache
+        if: steps.cmp.outputs.same != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: apk-cache
+          key: stock-apks-latest
+          restore-keys: stock-apks-
+
       - name: Test build with the newest engine
         if: steps.cmp.outputs.same != 'true'
         run: python3 scripts/ostore.py build "$CANARY" --engine engine-head --engine-sha "${{ steps.cmp.outputs.head }}"

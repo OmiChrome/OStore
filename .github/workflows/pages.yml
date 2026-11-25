@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 20
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deploy1.outputs.page_url || steps.deploy2.outputs.page_url || steps.deploy.outputs.page_url }}
     env:
       GH_TOKEN: ${{ github.token }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -44,7 +44,24 @@ jobs:
         with:
           path: site
 
+      # GitHub sometimes doesn't list a just-uploaded artifact yet; wait and retry.
+      - id: deploy1
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - if: steps.deploy1.outcome == 'failure'
+        run: sleep 30
+
+      - id: deploy2
+        if: steps.deploy1.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+
+      - if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
+        run: sleep 90
+
       - id: deploy
+        if: steps.deploy1.outcome == 'failure' && steps.deploy2.outcome == 'failure'
         uses: actions/deploy-pages@v5
 
       - name: Close an old store issue
@@ -54,5 +71,5 @@ jobs:
         if: failure()
         run: >
           python3 scripts/ostore.py issue-fail store --title "Store update failed"
-          --step "catalog=${{ steps.catalog.outcome }}, configure-pages=${{ steps.configure.outcome }}, upload=${{ steps.upload.outcome }}, deploy=${{ steps.deploy.outcome }}"
+          --step "catalog=${{ steps.catalog.outcome }}, configure-pages=${{ steps.configure.outcome }}, upload=${{ steps.upload.outcome }}, deploy=${{ steps.deploy1.outcome }}/${{ steps.deploy2.outcome }}/${{ steps.deploy.outcome }}"
           --message "Updating the store page failed at the step marked 'failure'. Pages must be on (Settings > Pages > Source: GitHub Actions). A deploy failure right after another deploy is usually a temporary clash; the next run fixes it."

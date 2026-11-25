@@ -55,7 +55,11 @@ experimental or beta) and finds the download (APKMirror or archive.org).
   Fails → pin stays, an issue says so, nothing breaks.
 - **Self-healing builds:** if a build fails on the pinned engine, it is retried once with the newest upstream engine.
   If that works, the pin moves forward.
-- **Download sources** are looked up again automatically if a download stops working.
+- **Download sources** come from [NullStore's maintained app list](https://github.com/nullcpy/rvb/tree/data/configs)
+  first (APKMirror's search blocks bots), then APKMirror and archive.org. They are looked up again if a download stops working.
+- **Original APKs are cached** (GitHub Actions cache, one file per app). When new patches support the same app
+  version, nothing is downloaded again. The cache never holds patches or the CLI, so those are always fresh.
+- **Store updates right away:** each app is released as soon as it is built, and the store refresh starts at once.
 - **Maintenance (weekly):** checks that the store and its download links work, deletes releases older than
   6 months (the newest build of every app is always kept), and makes a heartbeat commit if the repo has been quiet for 40 days
   (GitHub pauses schedules after 60 quiet days).

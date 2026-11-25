@@ -40,6 +40,8 @@ APPS_DIR = ROOT / "apps"
 STATE_DIR = ROOT / "state"
 OUT_DIR = ROOT / "out"
 ARCH = "arm64-v8a"
+KNOWN_SOURCES_REPO = "https://github.com/nullcpy/rvb"
+KNOWN_SOURCES_BRANCH = "data"
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:108.0) Gecko/20100101 Firefox/108.0"
 AWESOME_BUNDLES = "https://raw.githubusercontent.com/nvbangg/awesome-morphe/main/web/public/bundles.json"
 FAIL_LABEL = "build-failure"
@@ -265,24 +267,132 @@ def find_archive(pkg):
     return url if ".apk" in html else None
 
 
+_KNOWN = {}
+
+
+def known_sources():
+    """{package: {apkmirror, archive}} from NullStore's maintained app configs.
+
+    APKMirror's search page blocks bots, so this list is checked first. It is read
+    with plain git (works without API access) and only once per run.
+    """
+    if "index" in _KNOWN:
+        return _KNOWN["index"]
+    index = {}
+    tmp = ROOT / "out" / ".known-sources"
+    try:
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(parents=True)
+        git = lambda *c: subprocess.run(["git", "-C", str(tmp), *c], check=True,  # noqa: E731
+                                        capture_output=True, text=True, timeout=120).stdout
+        git("init", "-q")
+        git("fetch", "-q", "--depth", "1", KNOWN_SOURCES_REPO, KNOWN_SOURCES_BRANCH)
+        for path in git("ls-tree", "-r", "--name-only", "FETCH_HEAD").split():
+            if not path.endswith(".toml"):
+                continue
+            try:
+                doc = tomllib.loads(git("show", f"FETCH_HEAD:{path}"))
+            except Exception:
+                continue
+            for t in doc.values():
+                if not isinstance(t, dict) or not t.get("pkg-name"):
+                    continue
+                e = index.setdefault(t["pkg-name"], {})
+                for key in ("apkmirror", "archive"):
+                    if t.get(f"{key}-dlurl") and key not in e:
+                        e[key] = t[f"{key}-dlurl"].rstrip("/")
+        log(f"known download sources: {len(index)} apps from {KNOWN_SOURCES_REPO}")
+    except Exception as e:
+        log(f"known download sources unavailable: {e}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    _KNOWN["index"] = index
+    return index
+
+
+DL_KEYS = ("apkmirror", "archive")
+
+
 def resolve_sources(cfg, refresh=False):
-    """Where to download the original app. Cached in state/sources.json."""
+    """Where to download the original app. Cached in state/sources.json.
+
+    Order: the app file, the cache, NullStore's known list, then live lookups.
+    """
     cache = read_json(STATE_DIR / "sources.json", {})
     pkg = cfg["package"]
-    found = {} if refresh else dict(cache.get(pkg, {}))
+    found = {} if refresh else {k: v for k, v in cache.get(pkg, {}).items() if k in DL_KEYS}
+    known = None
     for key, finder in (("apkmirror", find_apkmirror), ("archive", find_archive)):
         if cfg.get(key):
             found[key] = cfg[key]
-        elif not found.get(key):
-            hit = finder(pkg)
-            if hit:
-                found[key] = hit
+            continue
+        if found.get(key):
+            continue
+        if known is None:
+            known = known_sources().get(pkg, {})
+        hit = finder(pkg) if key == "archive" else None  # j-hc's own mirror first for archive
+        hit = hit or known.get(key) or (finder(pkg) if key == "apkmirror" else None)
+        if hit:
+            found[key] = hit
     if not found:
-        raise RuntimeError(f"No download source found for {pkg} (tried APKMirror and archive.org). "
+        raise RuntimeError(f"No download source found for {pkg} (tried NullStore's list, APKMirror and archive.org). "
                            f"Add apkmirror = \"https://www.apkmirror.com/apk/<dev>/<app>\" to apps/{cfg['id']}.toml")
     cache[pkg] = {**cache.get(pkg, {}), **found}
     write_json(STATE_DIR / "sources.json", cache)
     return found
+
+
+# ----------------------------------------------------------------- stock APK cache
+
+def cache_dir():
+    return Path(os.environ.get("OSTORE_APK_CACHE", ROOT / "apk-cache"))
+
+
+def cache_restore(engine, pkg):
+    """Put cached original APKs of this app where the engine looks for them."""
+    temp = engine / "temp"
+    temp.mkdir(parents=True, exist_ok=True)
+    hits = []
+    for f in cache_dir().glob(f"{pkg}-*-{ARCH}.apk*"):
+        dst = temp / f.name
+        if not dst.exists():
+            try:
+                os.link(f, dst)
+            except OSError:
+                shutil.copy2(f, dst)
+        hits.append(f.name)
+    if hits:
+        log(f"stock APK from cache: {', '.join(sorted(hits))}")
+    return hits
+
+
+def cache_store(engine, pkg, version):
+    """Keep only the original APK of the version just built (one per app)."""
+    temp = engine / "temp"
+    files = list(temp.glob(f"{pkg}-{version}-{ARCH}.apk*"))
+    if not files:  # version names can differ slightly; take the newest download
+        cands = sorted(temp.glob(f"{pkg}-*-{ARCH}.apk*"), key=lambda f: f.stat().st_mtime)
+        if cands:
+            stem = cands[-1].name.removesuffix(".apkm")
+            files = [f for f in cands if f.name.removesuffix(".apkm") == stem]
+    files = [f for f in files if not f.name.startswith("tmp.")]
+    if not files:
+        return
+    d = cache_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    keep = {f.name for f in files}
+    for old in d.glob(f"{pkg}-*-{ARCH}.apk*"):
+        if old.name not in keep:
+            old.unlink()
+            log(f"cache: dropped old {old.name}")
+    for f in files:
+        dst = d / f.name
+        if not dst.exists():
+            try:
+                os.link(f, dst)
+            except OSError:
+                shutil.copy2(f, dst)
+            log(f"cache: saved {f.name}")
 
 
 # ----------------------------------------------------------------- build
@@ -460,6 +570,7 @@ def cmd_build(a):
     remembered = sources_state.get(cfg["package"], {}).get("clone_patch") if cfg["mode"] == "clone" else None
     extra = [remembered] if remembered else []
     excluded = set(list_args(cfg.get("excluded-patches", "")))
+    cache_restore(engine, cfg["package"])
     result = None
     for attempt in range(1, 4):
         write_engine_config(cfg, sources, conf, extra)
@@ -497,6 +608,7 @@ def cmd_build(a):
         log(f"rebuilding with extra patches: {more}")
         extra += more
     apk, info, cloned = result
+    cache_store(engine, cfg["package"], info["versionName"])
     if cfg["mode"] == "clone" and cloned:
         used = next((n for n in extra if n == find_clone_patch(listed, cfg["package"])), None)
         st = read_json(STATE_DIR / "sources.json", {})

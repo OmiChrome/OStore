@@ -1,11 +1,12 @@
 name: Build
 
 # Every 2 days: look for new stable patches and build only the apps that need it.
-# Also runs when a file in apps/ is added or changed by hand (builds just that app).
+# Also runs when apps/ or the scripts change: then it builds only apps that are new,
+# changed, or never built successfully.
 on:
   push:
     branches: [main]
-    paths: ["apps/**"]
+    paths: ["apps/**", "scripts/**"]
   schedule:
     - cron: "17 3 */2 * *"
   workflow_dispatch:
@@ -51,10 +52,41 @@ jobs:
           FORCE: ${{ inputs.force && '--force' || '' }}
         run: python3 scripts/ostore.py plan --only "$ONLY" $FORCE
 
+      - name: Restore original APKs from cache
+        id: restore
+        if: steps.plan.outputs.count != '0'
+        uses: actions/cache/restore@v6
+        with:
+          path: apk-cache
+          key: stock-apks-latest
+          restore-keys: stock-apks-
+
       - name: Build, release, report
         id: build
         if: steps.plan.outputs.count != '0'
         run: bash scripts/build-all.sh ${{ steps.plan.outputs.apps }}
+
+      - name: Cache key for original APKs
+        id: ck
+        if: always() && steps.plan.outputs.count != '0'
+        run: |
+          mkdir -p apk-cache
+          ls -la apk-cache
+          echo "key=stock-apks-$(ls apk-cache | sort | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Save original APKs to cache
+        id: save
+        if: always() && steps.ck.outputs.key != '' && steps.ck.outputs.key != steps.restore.outputs.cache-matched-key
+        uses: actions/cache/save@v6
+        with:
+          path: apk-cache
+          key: ${{ steps.ck.outputs.key }}
+
+      - name: Drop older APK caches
+        if: always() && steps.save.outcome == 'success'
+        env:
+          KEY: ${{ steps.ck.outputs.key }}
+        run: gh cache list --key stock-apks- --limit 100 --json key --jq '.[].key' | grep -vx "$KEY" | xargs -r -n1 gh cache delete || true
 
       - name: Save state
         if: always() && steps.plan.outputs.count != '0'

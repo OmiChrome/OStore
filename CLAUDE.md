@@ -41,7 +41,8 @@ A local build needs Java 21, `jq`, `zip` and `curl`. Run `python3 scripts/ostore
 
 **One app build** (`cmd_build` in `scripts/ostore.py`):
 
-1. `resolve_sources`: finds APKMirror and archive.org URLs from the package name and caches them in `state/sources.json`. Fields `apkmirror`/`archive` in the app's toml override this.
+1. `resolve_sources`: finds download URLs and caches them in `state/sources.json`. Order: `apkmirror`/`archive` fields in the app's toml, the cache, j-hc's archive.org mirror, then NullStore's maintained `nullcpy/rvb` `data` branch configs (`known_sources`, fetched with git, not the API). APKMirror's own search is last because it returns 403 to bots.
+   - **Stock APK cache:** `cache_restore` and `cache_store` keep one original APK (plus its `.apkm`) per app in `apk-cache/`. That folder is saved with `actions/cache`, keyed by a hash of its file names; older cache keys are deleted. Never cache `engine/temp/*-rv`: with `latest`, j-hc reuses a local patches or CLI file without checking for a newer release.
 2. `write_engine_config`: writes a j-hc TOML with `arch="arm64-v8a"`, `version="auto"` (newest *stable*, i.e. non-experimental, target of the patches), `patches-version="latest"` (latest non-prerelease release) and `pkg-name`.
 3. Runs `bash build.sh` in the engine with stdin set to `/dev/null`. This matters: j-hc's `build.sh` can block on `cat` reading stdin.
 4. **Extra patches, found after the first engine run** (up to 3 runs, the stock APK stays cached):
@@ -53,6 +54,7 @@ A local build needs Java 21, `jq`, `zip` and `curl`. Run `python3 scripts/ostore
 
 **Data flow:**
 - `plan` writes `out/plan.json` (the patch tag of each app) and is the input to `build`.
+- `build-all.sh` releases each app right after its build and starts `pages.yml` each time. Pages runs queue (`cancel-in-progress: false`), and deploy is retried because the artifact sometimes isn't listed yet.
 - `release` uploads the APK, `meta.json` and `build-log.txt` as a GitHub release tagged `<id>-v<version>-<patches>-<stamp>`. `cleanup` relies on the `<id>-v<digit>` prefix of that tag.
 - `record` updates `state/built.json`. The next `plan` compares its `patches_tag` and `config_hash` to decide what to rebuild.
 - `catalog` turns all releases' `meta.json` files into `site/data.json`. It also writes `site/lookup.json`, a compact app and bundle index from awesome-morphe's `bundles.json` that the Add page preview uses.
