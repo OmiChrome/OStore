@@ -30,7 +30,7 @@ jobs:
           gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY"
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Read the form
         id: add
