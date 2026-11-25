@@ -347,6 +347,80 @@ def resolve_sources(cfg, refresh=False):
     return found
 
 
+# ----------------------------------------------------------------- stock APK inbox
+
+INBOX_TAG = "stock-apks"
+
+
+def apk_identity(path):
+    """(package, versionName) of an .apk, or of base.apk inside an .apkm/.apks bundle."""
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        names = z.namelist()
+        if "AndroidManifest.xml" in names:
+            return tuple(manifest_info(path)[k] for k in ("package", "versionName"))
+        base = next((n for n in names if n.endswith("base.apk")), None)
+        if not base:
+            raise ValueError("no base.apk in bundle")
+        tmp = Path(str(path) + ".base.apk")
+        tmp.write_bytes(z.read(base))
+        try:
+            return tuple(manifest_info(tmp)[k] for k in ("package", "versionName"))
+        finally:
+            tmp.unlink()
+
+
+def inbox_restore(engine, pkg):
+    """Original APKs you uploaded to the 'stock-apks' release, put where the engine looks.
+
+    The engine still checks the developer signature (signers.txt) before patching.
+    """
+    try:
+        rel = api(f"repos/{repo_slug()}/releases/tags/{INBOX_TAG}")
+    except Exception:
+        return []
+    temp = engine / "temp"
+    temp.mkdir(parents=True, exist_ok=True)
+    used = []
+    have = [f.name for f in temp.glob(f"{pkg}-*-{ARCH}.apk*")]
+    for asset in rel.get("assets", []):
+        name = asset["name"]
+        if not name.startswith(pkg) or not re.search(r"\.(apk|apkm|apks)$", name):
+            continue
+        if any(h.split("-")[1] in name for h in have if "-" in h):
+            continue  # this version is already here (from the cache)
+        raw = temp / f"inbox-{name}"
+        try:
+            raw.write_bytes(http(asset["browser_download_url"], timeout=600))
+            got_pkg, ver = apk_identity(raw)
+        except Exception as e:
+            log(f"inbox: skip {name}: {e}")
+            raw.unlink(missing_ok=True)
+            continue
+        if got_pkg != pkg:
+            log(f"inbox: skip {name}: it is {got_pkg}, not {pkg}")
+            raw.unlink()
+            continue
+        dst = temp / f"{pkg}-{ver}-{ARCH}.apk" if name.endswith(".apk") else temp / f"{pkg}-{ver}-{ARCH}.apk.apkm"
+        raw.replace(dst)
+        used.append((ver, dst))
+    if used:
+        log("inbox: using " + ", ".join(d.name for _, d in used))
+    return used
+
+
+def missing_stock_hint(cfg, log_text):
+    m = re.findall(r"Choosing version '([^']+)'", log_text)
+    if "Stock apk not found" not in log_text or not m:
+        return ""
+    ver = m[-1]
+    return (f" No download source had the original {cfg.get('name', cfg['id'])} {ver}. "
+            f"Download the original (unpatched) `{cfg['package']}` version **{ver}** (arm64-v8a or universal, "
+            f".apk or .apkm, for example from APKMirror on your phone) and upload it unchanged to "
+            f"https://github.com/{repo_slug()}/releases/tag/{INBOX_TAG} (Edit, attach file, Update). "
+            f"Then run the Build workflow, or wait for the next scheduled run.")
+
+
 # ----------------------------------------------------------------- stock APK cache
 
 def cache_dir():
@@ -423,6 +497,8 @@ def write_engine_config(cfg, sources, path, extra):
         "enable-update-checks = false",
         f"pkg-name = {toml_str(cfg['package'])}",
     ]
+    if cfg.get("direct"):
+        lines.append(f"direct-dlurl = {toml_str(cfg['direct'])}")
     if "apkmirror" in sources:
         lines.append(f"apkmirror-dlurl = {toml_str(sources['apkmirror'])}")
     if "archive" in sources:
@@ -576,6 +652,10 @@ def cmd_build(a):
     extra = [remembered] if remembered else []
     excluded = set(list_args(cfg.get("excluded-patches", "")))
     cache_restore(engine, cfg["package"])
+    for ver, f in inbox_restore(engine, cfg["package"]):
+        if f.name.endswith(".apkm"):
+            # Offline "direct" source: j-hc merges the uploaded bundle without any download.
+            cfg = {**cfg, "direct": f"file:///{cfg['package']}-{ver}-{ARCH}.apkm"}
     result = None
     for attempt in range(1, 4):
         write_engine_config(cfg, sources, conf, extra)
@@ -590,7 +670,9 @@ def cmd_build(a):
             write_engine_config(cfg, sources, conf, extra)
             rc, apks = run_engine(engine, conf.name, log_path)
         if not apks:
-            fail("patch", f"engine produced no APK (exit {rc}); see log tail")
+            hint = missing_stock_hint(cfg, log_path.read_text(errors="replace"))
+            fail("download-original-apk" if hint else "patch",
+                 (hint.strip() if hint else f"engine produced no APK (exit {rc}); see log tail"))
         apk = apks[0]
         info = manifest_info(apk)
         cloned = info["package"] != cfg["package"]
@@ -688,7 +770,7 @@ def cmd_build(a):
             "failed": failed,
         },
         "experimental_versions": exp_versions,
-        "config_hash": config_hash(cfg),
+        "config_hash": config_hash(apps[a.app]),
     }
     write_json(out / "meta.json", meta)
     log(f"built {file_name} ({meta['kind']}, {len(applied)} patches)")

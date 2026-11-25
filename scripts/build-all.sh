@@ -28,6 +28,11 @@ publish() { # app -> release, remember, refresh store, close old failure issue
 	fi
 }
 
+# The inbox for original APKs you upload by hand (see .github/stock-apks-release.md).
+gh release view stock-apks >/dev/null 2>&1 ||
+	gh release create stock-apks --prerelease --latest=false --title "Original APK inbox (not an app)" \
+		--notes-file .github/stock-apks-release.md >/dev/null 2>&1 || echo "::warning::could not create the stock-apks inbox"
+
 PIN=$($OST engine --dir engine | sed -n 's/^sha=//p')
 [ -n "$PIN" ] || { echo "::error::could not fetch the pinned engine"; $OST issue-fail engine --step fetch-engine --message "Could not download the pinned j-hc engine."; exit 1; }
 

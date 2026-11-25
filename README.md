@@ -48,6 +48,17 @@ Add `all-patches = true` to an app file to also turn on that app's patches that 
 The builder finds the version itself (the newest app version the patches mark as **stable**, never
 experimental or beta) and finds the download (APKMirror or archive.org).
 
+### When an original APK can't be downloaded automatically
+
+Some stores (APKMirror) block GitHub's servers, and other mirrors may lack the exact version or
+only have modified copies. Then the `build-failure` issue says exactly which file is needed:
+
+1. Download that original APK on your phone or PC (APKMirror, or a
+   [Morphe download helper](https://github.com/nvbangg/awesome-morphe#-%EF%B8%8F-download-helpers)).
+2. Upload it unchanged to the [`stock-apks` release](https://github.com/OmiChrome/OStore/releases/tag/stock-apks) (Edit → attach → Update).
+3. Run **Build**. The file is used only if the package, version and (for apps in `signers.txt`) the real developer
+   signature match. It is then cached, so you only do this when the patches move to a new app version.
+
 ## Staying alive without maintenance
 
 - **Upstream code is linked, not copied.** The builder is [j-hc/revanced-magisk-module](https://github.com/j-hc/revanced-magisk-module),
