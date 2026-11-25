@@ -1,0 +1,12 @@
+{
+  "youtube-morpheapp": {
+    "built_at": "2026-11-25T17:33:48Z",
+    "config_hash": "19febee98cc2",
+    "engine_commit": "e544fdd87f843e182cecb313ce7baeb6c4f72f61",
+    "kind": "clone",
+    "patches_tag": "v2.3.0",
+    "patches_version": "v2.3.0",
+    "release_tag": "youtube-morpheapp-v21.30.216-2.3.0-202611251733",
+    "version": "21.30.216"
+  }
+}
