@@ -43,7 +43,6 @@ ARCH = "arm64-v8a"
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:108.0) Gecko/20100101 Firefox/108.0"
 AWESOME_BUNDLES = "https://raw.githubusercontent.com/nvbangg/awesome-morphe/main/web/public/bundles.json"
 FAIL_LABEL = "build-failure"
-CLONE_PATCH = "Clone app"
 
 
 # ----------------------------------------------------------------- helpers
@@ -292,10 +291,8 @@ def toml_str(v):
     return json.dumps(v)
 
 
-def write_engine_config(cfg, sources, path, clone_patch):
-    included = cfg.get("included-patches", "")
-    if clone_patch:
-        included = (included + f' "{CLONE_PATCH}"').strip()
+def write_engine_config(cfg, sources, path, extra):
+    included = " ".join([cfg.get("included-patches", "")] + [f'"{n}"' for n in extra]).strip()
     lines = [
         "parallel-jobs = 1",
         "enable-module-update = false",
@@ -355,11 +352,24 @@ def parse_list_patches(text):
         enabled = re.search(r"^Enabled: (\w+)", block, re.M)
         versions = re.findall(r"^\t\t(\S+)$", block, re.M)
         out[name.group(1).strip()] = {
+            "packages": re.findall(r"Package name: (\S+)", block),
             "description": desc.group(1).strip() if desc else "",
             "default": (enabled.group(1) == "true") if enabled else True,
             "versions": versions,
         }
     return out
+
+
+def list_args(text):
+    """Patch names from a config string like '"One" "Two"'."""
+    return re.findall(r'"([^"]+)"', text or "")
+
+
+def find_clone_patch(listed, pkg):
+    """The bundle's patch that renames the package: app-specific first, then universal."""
+    names = [n for n in listed if re.fullmatch(r"(clone( app)?|change package name)", n, re.I)]
+    names.sort(key=lambda n: (pkg not in listed[n].get("packages", []), n.lower() != "clone app"))
+    return names[0] if names else None
 
 
 def engine_prebuilts(engine, repo):
@@ -445,11 +455,14 @@ def cmd_build(a):
         fail("find-download-source", str(e))
     log(f"{a.app}: sources {sources}")
 
-    clone_patch = cfg["mode"] == "clone" and bool(sources_state.get(cfg["package"], {}).get("needs_clone_patch"))
-    attempts = [clone_patch] + ([True] if cfg["mode"] == "clone" and not clone_patch else [])
+    # Patches added on top of the bundle defaults: remembered clone patch, then
+    # anything the first build shows is needed (clone patch, all-patches).
+    remembered = sources_state.get(cfg["package"], {}).get("clone_patch") if cfg["mode"] == "clone" else None
+    extra = [remembered] if remembered else []
+    excluded = set(list_args(cfg.get("excluded-patches", "")))
     result = None
-    for attempt, use_clone in enumerate(attempts, 1):
-        write_engine_config(cfg, sources, conf, use_clone)
+    for attempt in range(1, 4):
+        write_engine_config(cfg, sources, conf, extra)
         rc, apks = run_engine(engine, conf.name, log_path)
         if not apks and attempt == 1:
             # The download source may have moved: look it up again once.
@@ -458,21 +471,39 @@ def cmd_build(a):
                 sources = resolve_sources(cfg, refresh=True)
             except Exception as e:
                 fail("find-download-source", str(e))
-            write_engine_config(cfg, sources, conf, use_clone)
+            write_engine_config(cfg, sources, conf, extra)
             rc, apks = run_engine(engine, conf.name, log_path)
         if not apks:
             fail("patch", f"engine produced no APK (exit {rc}); see log tail")
         apk = apks[0]
         info = manifest_info(apk)
         cloned = info["package"] != cfg["package"]
-        result = (apk, info, cloned, use_clone)
-        if cfg["mode"] != "clone" or cloned:
+        result = (apk, info, cloned)
+
+        more = []
+        mpp, cli = engine_prebuilts(engine, cfg["patches"])
+        listed = list_patches(cli, mpp, cfg["package"], False) if mpp and cli else {}
+        if cfg.get("all-patches"):
+            _, skipped, _ = parse_patch_log(log_path.read_text(errors="replace"))
+            more += [n for n in skipped if listed.get(n, {}).get("packages") and n not in excluded and n not in extra]
+        if cfg["mode"] == "clone" and not cloned:
+            name = find_clone_patch(listed, cfg["package"])
+            if not name:
+                log("this bundle has no clone patch; publishing a standalone build")
+            elif name not in extra and name not in more:
+                more.append(name)
+        if not more:
             break
-        log(f"{info['package']} is not a clone; retrying with the '{CLONE_PATCH}' patch")
-    apk, info, cloned, used_clone_patch = result
-    if cfg["mode"] == "clone" and used_clone_patch and cloned:
+        log(f"rebuilding with extra patches: {more}")
+        extra += more
+    apk, info, cloned = result
+    if cfg["mode"] == "clone" and cloned:
+        used = next((n for n in extra if n == find_clone_patch(listed, cfg["package"])), None)
         st = read_json(STATE_DIR / "sources.json", {})
-        st.setdefault(cfg["package"], {})["needs_clone_patch"] = True
+        if used:
+            st.setdefault(cfg["package"], {})["clone_patch"] = used
+        else:
+            st.setdefault(cfg["package"], {}).pop("clone_patch", None)
         write_json(STATE_DIR / "sources.json", st)
 
     # Signature guard: if the engine ever stops using our key, stop here.
@@ -713,9 +744,14 @@ def parse_issue_form(body):
 def check_bundle_supports(repo, pkg):
     """Fail early if the bundle clearly has no patches for this package."""
     rel = latest_stable(repo)  # also proves the repo exists and has a stable release
-    try:
-        plist = json.loads(http(f"https://raw.githubusercontent.com/{repo}/{rel['tag']}/patches-list.json", timeout=60))
-    except Exception:
+    plist = None
+    for ref in (rel["tag"], "HEAD"):  # some bundles only commit the list after tagging
+        try:
+            plist = json.loads(http(f"https://raw.githubusercontent.com/{repo}/{ref}/patches-list.json", timeout=60))
+            break
+        except Exception:
+            continue
+    if plist is None:
         log("no patches-list.json in this bundle; the first build will check compatibility")
         return
     pkgs = {c["packageName"] for x in plist.get("patches", []) for c in (x.get("compatiblePackages") or [])}
@@ -742,6 +778,7 @@ def cmd_add_app(a):
         f"package = {toml_str(pkg)}",
         f"patches = {toml_str(repo)}",
         f"mode = {toml_str(mode)}  # clone = installs next to the original app",
+        "# all-patches = true  # also turn on this app's patches that are off by default",
         "",
         "# Optional. Patch names in quotes, separated by spaces:",
         "# included-patches = '\"Patch one\" \"Patch two\"'",

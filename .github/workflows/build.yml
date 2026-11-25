@@ -1,7 +1,11 @@
 name: Build
 
 # Every 2 days: look for new stable patches and build only the apps that need it.
+# Also runs when a file in apps/ is added or changed by hand (builds just that app).
 on:
+  push:
+    branches: [main]
+    paths: ["apps/**"]
   schedule:
     - cron: "17 3 */2 * *"
   workflow_dispatch:

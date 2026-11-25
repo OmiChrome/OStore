@@ -1,0 +1,12 @@
+# Added from chat on 2026-11-25
+name = "Instagram"
+package = "com.instagram.android"
+patches = "crimera/piko"
+mode = "clone"  # clone = installs next to the original app
+all-patches = true  # also turn on this app's patches that are off by default
+
+# Optional. Patch names in quotes, separated by spaces:
+# included-patches = '"Patch one" "Patch two"'
+# excluded-patches = '"Patch three"'
+# Optional. Set only if the automatic download lookup fails:
+# apkmirror = "https://www.apkmirror.com/apk/<developer>/<app>"

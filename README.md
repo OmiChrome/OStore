@@ -40,6 +40,10 @@ every 2 days ──► Build workflow
 The `Add app` workflow writes `apps/<id>.toml`, starts the first build and closes the issue.
 Only issues from the repo owner are accepted. You can also add or edit a file in `apps/` by hand.
 
+Changing or adding a file in `apps/` by hand also starts a build of just that app.
+Add `all-patches = true` to an app file to also turn on that app's patches that are off by default
+(patches that apply to every app, like "Spoof signature", stay off).
+
 The builder finds the version itself (the newest app version the patches mark as **stable**, never
 experimental or beta) and finds the download (APKMirror or archive.org).
 

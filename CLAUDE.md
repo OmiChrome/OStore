@@ -44,7 +44,9 @@ A local build needs Java 21, `jq`, `zip` and `curl`. Run `python3 scripts/ostore
 1. `resolve_sources`: finds APKMirror and archive.org URLs from the package name and caches them in `state/sources.json`. Fields `apkmirror`/`archive` in the app's toml override this.
 2. `write_engine_config`: writes a j-hc TOML with `arch="arm64-v8a"`, `version="auto"` (newest *stable*, i.e. non-experimental, target of the patches), `patches-version="latest"` (latest non-prerelease release) and `pkg-name`.
 3. Runs `bash build.sh` in the engine with stdin set to `/dev/null`. This matters: j-hc's `build.sh` can block on `cat` reading stdin.
-4. **Clone check:** reads the APK manifest with `axml.py`. If the package didn't change, it rebuilds once with Morphe's universal `"Clone app"` patch and remembers `needs_clone_patch` in `state/sources.json`. For YouTube, the GmsCore/MicroG patch already renames the package to `app.morphe.android.youtube`.
+4. **Extra patches, found after the first engine run** (up to 3 runs, the stock APK stays cached):
+   - **Clone:** reads the APK manifest with `axml.py`. If the package didn't change, `find_clone_patch` picks the bundle's own rename patch (`Clone` in Piko, the universal `Clone app` in Morphe) and the app is rebuilt. The name is remembered as `clone_patch` in `state/sources.json`. For YouTube, the GmsCore/MicroG patch already renames the package to `app.morphe.android.youtube`.
+   - **`all-patches = true`:** patches the log reports as `Skipping disabled` are turned on, but only those `list-patches` shows as made for this app. Universal ones such as "Spoof signature" stay off.
 5. **Signature guard:** the APK's certificate must match `keystore/fingerprint.txt`, otherwise the build fails.
 6. **Patch lists** come from the engine log lines `INFO: Applied: X` and `INFO: Skipping disabled: X`. Descriptions and the experimental versions skipped come from `morphe-cli list-patches -p -v [-x]`, run on the jar and `.mpp` file the engine cached in `engine/temp/<owner>-rv/`.
 7. Writes `out/<id>/meta.json`. That file is the data contract with the site.
