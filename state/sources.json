@@ -1,4 +1,8 @@
 {
+  "com.google.android.apps.youtube.music": {
+    "apkmirror": "https://www.apkmirror.com/apk/google-inc/youtube-music-android-automotive",
+    "archive": "https://archive.org/download/jhc-apks/apks/com.google.android.apps.youtube.music"
+  },
   "com.google.android.youtube": {
     "apkmirror": "https://www.apkmirror.com/apk/google-inc/youtube",
     "archive": "https://archive.org/download/jhc-apks/apks/com.google.android.youtube"

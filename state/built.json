@@ -8,5 +8,15 @@
     "patches_version": "v2.3.0",
     "release_tag": "youtube-morpheapp-v21.30.216-2.3.0-202611251733",
     "version": "21.30.216"
+  },
+  "youtube-music-morpheapp": {
+    "built_at": "2026-11-25T17:38:48Z",
+    "config_hash": "37eb3cc688ca",
+    "engine_commit": "e544fdd87f843e182cecb313ce7baeb6c4f72f61",
+    "kind": "clone",
+    "patches_tag": "v2.3.0",
+    "patches_version": "v2.3.0",
+    "release_tag": "youtube-music-morpheapp-v9.30.53-2.3.0-202611251738",
+    "version": "9.30.53"
   }
 }
