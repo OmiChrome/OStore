@@ -229,6 +229,11 @@ def cmd_engine(a):
     run("checkout", "-q", "FETCH_HEAD")
     # Sign with our own key, not the one that ships with the engine.
     shutil.copy(ROOT / "keystore" / "ostore.keystore", d / "ks.keystore")
+    # Add our pinned developer keys: j-hc refuses to patch an original APK of a
+    # listed app unless it is signed by that key (re-signed mirrors are rejected).
+    ours = (ROOT / "signers.txt").read_text() if (ROOT / "signers.txt").exists() else ""
+    with open(d / "sig.txt", "a") as f:
+        f.write("\n" + "\n".join(l.strip() for l in ours.splitlines() if l.strip() and not l.startswith("#")) + "\n")
     log(f"engine {repo}@{sha[:10]} ready in {d}")
     gh_output("sha", sha)
 

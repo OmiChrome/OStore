@@ -73,6 +73,8 @@ A local build needs Java 21, `jq`, `zip` and `curl`. Run `python3 scripts/ostore
 
 ## Rules that matter
 
+- `signers.txt` pins the real developer certificate of an original app. `ostore.py engine` appends it to j-hc's `sig.txt`, so j-hc's `check_sig` refuses re-signed copies. Verify a new pin against an independent copy (for example archive.org) before adding it. NullStore's `nullcpy/apks` mirror re-signs merged APKs with its own key, so it is not a usable source. Don't try to get past APKMirror/Cloudflare bot protection.
+
 - **Never change or regenerate `keystore/ostore.keystore`.** Installed apps can only update while the key stays the same. Its alias and password (`jhc` / `123456789`) are what j-hc hardcodes.
 - Only GitHub patch sources are supported, because the engine reads GitHub releases only.
 - Never build beyond stable: no `version="experimental"`, no prerelease patches.

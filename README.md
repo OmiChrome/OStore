@@ -25,6 +25,7 @@ every 2 days ──► Build workflow
 | `apps/*.toml` | One file per app. This is the only thing you ever change. |
 | `engine.lock` | The j-hc builder commit we trust. Moves forward by itself. |
 | `keystore/` | The O Store signing key (see "Signing key" below). |
+| `signers.txt` | Pinned signing keys of the *original* apps (`<sha256> <package>`). An original APK not signed by its real developer is refused. |
 | `scripts/ostore.py` | All the logic (plan, build, release, store data, issues). |
 | `site/` | The store page (plain HTML/JS, no build step). |
 | `state/` | What was built last, and where each app is downloaded from. Written by the bot. |
