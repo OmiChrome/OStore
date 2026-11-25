@@ -1,0 +1,63 @@
+name: Add app
+
+# Turns an "Add app" issue from the repo owner into apps/<id>.toml and starts a build.
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: state-writer
+  cancel-in-progress: false
+
+jobs:
+  add:
+    if: contains(github.event.issue.labels.*.name, 'add-app') || startsWith(github.event.issue.title, 'Add app')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      NUMBER: ${{ github.event.issue.number }}
+    steps:
+      - name: Only the owner can add apps
+        if: github.event.issue.user.login != github.repository_owner
+        run: |
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" -b "Only the owner of this store can add apps. Closing."
+          gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY"
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - name: Read the form
+        id: add
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          printf '%s' "$BODY" > /tmp/body.md
+          if ! python3 scripts/ostore.py add-app --body-file /tmp/body.md --issue "$NUMBER" 2>/tmp/err.txt; then
+            { echo "Could not add this app:"; echo; echo '```'; tail -5 /tmp/err.txt; echo '```'; echo; echo "Edit the issue to fix it and I will try again."; } > /tmp/reply.md
+            gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" -F /tmp/reply.md
+            exit 1
+          fi
+          cat /tmp/err.txt
+
+      - name: Save the app
+        run: |
+          bash scripts/commit.sh "apps: add ${{ steps.add.outputs.id }} (#${{ github.event.issue.number }})" apps
+
+      - name: Start the build
+        env:
+          ID: ${{ steps.add.outputs.id }}
+        run: |
+          gh workflow run build.yml --ref main -f apps="$ID"
+          {
+            echo "Added as \`apps/$ID.toml\` and the first build has started: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/build.yml"
+            echo
+            echo "It shows up in the store when the build finishes. If it fails, a \`build-failure\` issue is opened with the reason."
+          } > /tmp/reply.md
+          gh issue comment "$NUMBER" -R "$GITHUB_REPOSITORY" -F /tmp/reply.md
+          gh issue close "$NUMBER" -R "$GITHUB_REPOSITORY"

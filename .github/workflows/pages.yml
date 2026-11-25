@@ -1,0 +1,54 @@
+name: Store
+
+# Rebuilds the store page (GitHub Pages) from the releases.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["site/**", "scripts/ostore.py"]
+  schedule:
+    - cron: "41 5 * * 0" # weekly refresh of download counts
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  issues: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Make data.json from releases
+        run: python3 scripts/ostore.py catalog --out site/data.json
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: Close an old store issue
+        run: python3 scripts/ostore.py issue-ok store --title "Store update failed" || true
+
+      - name: Report failure
+        if: failure()
+        run: >
+          python3 scripts/ostore.py issue-fail store --title "Store update failed" --step store-deploy
+          --message "Updating the store page failed. If this is the first run, turn on Pages: Settings > Pages > Source: GitHub Actions."

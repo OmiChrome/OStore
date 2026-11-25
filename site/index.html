@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>O Store</title>
+  <meta name="description" content="Patched Android apps, built automatically from stable Morphe patches. Cloned apps install next to the originals.">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/"><img src="icon.svg" alt="" width="28" height="28"> O Store</a>
+    <nav><a href="#/about">About</a><a href="#/add" class="muted">Add app</a></nav>
+  </header>
+
+  <main id="view" aria-live="polite"><p class="loading">Loading apps…</p></main>
+
+  <dialog id="microg">
+    <h2>This app needs MicroG-RE</h2>
+    <p>Your download has started. To sign in with your Google account, this app needs <b>MicroG-RE</b> installed too (one time only).</p>
+    <ol class="steps">
+      <li>Install MicroG-RE.</li>
+      <li>Install the app you just downloaded.</li>
+      <li>Open it and sign in.</li>
+    </ol>
+    <div class="row">
+      <a id="microg-dl" class="btn" href="#">Download MicroG-RE</a>
+      <button class="btn ghost" value="close" formmethod="dialog" onclick="this.closest('dialog').close()">I already have it</button>
+    </div>
+  </dialog>
+
+  <footer class="foot">
+    <span id="updated"></span>
+    <a id="report" href="#">Report a problem</a>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

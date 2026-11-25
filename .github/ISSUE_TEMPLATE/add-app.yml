@@ -1,0 +1,38 @@
+name: Add app
+description: Add an app to the store (owner only). Easiest from the store's Add page.
+title: "Add app: "
+labels: ["add-app"]
+body:
+  - type: input
+    id: patch_source
+    attributes:
+      label: Patch source link
+      description: Copy from morphe-patches.software, awesome-morphe, or any GitHub patch repo.
+      placeholder: https://morphe.software/add-source?github=MorpheApp/morphe-patches
+    validations:
+      required: true
+  - type: input
+    id: package
+    attributes:
+      label: Package name
+      description: The original app's package name.
+      placeholder: com.google.android.youtube
+    validations:
+      required: true
+  - type: input
+    id: app_name
+    attributes:
+      label: App name
+      placeholder: YouTube
+    validations:
+      required: false
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Clone (installs next to the original)
+        - Standalone (replaces the original)
+      default: 0
+    validations:
+      required: true

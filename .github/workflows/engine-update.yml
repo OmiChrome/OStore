@@ -1,0 +1,57 @@
+name: Engine update
+
+# Weekly: try the newest j-hc builder with a test build. Move the pin only if it works.
+on:
+  schedule:
+    - cron: "29 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: state-writer
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      CANARY: youtube-morpheapp
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "21"
+
+      - name: Compare pin with upstream
+        id: cmp
+        run: |
+          PIN=$(sed -n 's/^JHC_COMMIT=//p' engine.lock)
+          python3 scripts/ostore.py engine --dir engine-head --sha HEAD | tee /tmp/eng.txt
+          HEAD_SHA=$(sed -n 's/^sha=//p' /tmp/eng.txt)
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$HEAD_SHA" = "$PIN" ]; then echo "same=true" >> "$GITHUB_OUTPUT"; echo "Already on the newest engine."; fi
+
+      - name: Test build with the newest engine
+        if: steps.cmp.outputs.same != 'true'
+        run: python3 scripts/ostore.py build "$CANARY" --engine engine-head --engine-sha "${{ steps.cmp.outputs.head }}"
+
+      - name: Move the pin
+        if: steps.cmp.outputs.same != 'true'
+        run: |
+          sed -i "s/^JHC_COMMIT=.*/JHC_COMMIT=${{ steps.cmp.outputs.head }}/" engine.lock
+          bash scripts/commit.sh "engine: move j-hc pin to ${{ steps.cmp.outputs.head }} (test build passed)" engine.lock
+          python3 scripts/ostore.py issue-ok engine-update --title "Engine update blocked" || true
+
+      - name: Report (pin kept, nothing broken)
+        if: failure()
+        run: >
+          python3 scripts/ostore.py issue-fail "$CANARY" --title "Engine update blocked"
+          --message "The newest j-hc engine failed a test build, so the store keeps using the older pinned engine. Nothing is broken; this waits for upstream to fix it."
