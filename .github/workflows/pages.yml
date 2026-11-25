@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false # queue updates; never cancel a deploy halfway
 
 jobs:
   deploy:
@@ -32,12 +32,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Make data.json from releases
+      - id: catalog
+        name: Make data.json from releases
         run: python3 scripts/ostore.py catalog --out site/data.json
 
-      - uses: actions/configure-pages@v6
+      - id: configure
+        uses: actions/configure-pages@v6
 
-      - uses: actions/upload-pages-artifact@v5
+      - id: upload
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
@@ -50,5 +53,6 @@ jobs:
       - name: Report failure
         if: failure()
         run: >
-          python3 scripts/ostore.py issue-fail store --title "Store update failed" --step store-deploy
-          --message "Updating the store page failed. If this is the first run, turn on Pages: Settings > Pages > Source: GitHub Actions."
+          python3 scripts/ostore.py issue-fail store --title "Store update failed"
+          --step "catalog=${{ steps.catalog.outcome }}, configure-pages=${{ steps.configure.outcome }}, upload=${{ steps.upload.outcome }}, deploy=${{ steps.deploy.outcome }}"
+          --message "Updating the store page failed at the step marked 'failure'. Pages must be on (Settings > Pages > Source: GitHub Actions). A deploy failure right after another deploy is usually a temporary clash; the next run fixes it."

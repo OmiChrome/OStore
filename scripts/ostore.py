@@ -632,7 +632,11 @@ def cmd_catalog(a):
     microg = {}
     try:
         rel = api("repos/MorpheApp/MicroG-RE/releases/latest")
-        apk = next(x for x in rel["assets"] if x["name"].endswith(".apk"))
+        names = [x for x in rel["assets"] if x["name"].endswith(".apk")]
+        # arm64 build with the launcher icon (this store is arm64-only), else the universal APK.
+        apk = (next((x for x in names if x["name"].endswith("-icon-arm64-v8a.apk")), None)
+               or next((x for x in names if re.fullmatch(r"microg-[\d.]+\.apk", x["name"])), None)
+               or names[0])
         microg = {"version": rel["tag_name"], "url": apk["browser_download_url"], "page": rel["html_url"]}
     except Exception as e:
         log(f"MicroG-RE lookup failed: {e}")
@@ -813,8 +817,8 @@ def cmd_health(a):
         data = None
         problems.append(f"data.json could not be loaded: {e}")
     if data is not None:
-        if not data.get("apps"):
-            problems.append("data.json has no apps")
+        if not data.get("apps") and read_json(STATE_DIR / "built.json", {}):
+            problems.append("data.json has no apps, but state/built.json says apps were built")
         for app in data.get("apps", []):
             if not app.get("active"):
                 continue
