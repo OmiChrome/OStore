@@ -3,7 +3,25 @@
 
 const $ = (s, el = document) => el.querySelector(s);
 const view = $("#view");
-const state = { data: null, q: "", kind: "all", lookup: null };
+const state = { data: null, q: "", maker: "all", lookup: null };
+
+// Who makes the original app, from its package name. Anything not listed is "Other".
+const MAKERS = [
+  ["Google", /^com\.google\./],
+  ["Meta", /^com\.(facebook|instagram|whatsapp|meta|oculus)\b|^com\.facebook\./],
+  ["Microsoft", /^com\.(microsoft|skype|linkedin)\b/],
+  ["Amazon", /^(com|in)\.amazon\./],
+  ["X", /^com\.twitter\./],
+  ["Reddit", /^com\.reddit\./],
+  ["Spotify", /^com\.spotify\./],
+  ["TikTok", /^com\.(zhiliaoapp\.musically|ss\.android)\b/],
+  ["Snap", /^com\.snapchat\./],
+  ["Adobe", /^com\.adobe\./],
+];
+const maker = (a) => {
+  const pkg = a.latest.original_package || a.latest.package || "";
+  return (MAKERS.find(([, re]) => re.test(pkg)) || ["Other"])[0];
+};
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const mb = (n) => (n / 1e6).toFixed(1) + " MB";
@@ -33,7 +51,10 @@ async function load() {
     const r = await fetch("data.json", { cache: "no-cache" });
     if (!r.ok) throw new Error(`data.json: HTTP ${r.status}`);
     state.data = await r.json();
-    $("#updated").textContent = `Updated ${ago(state.data.generated_at)}`;
+    const up = $("#updated");
+    up.textContent = `Updated ${ago(state.data.generated_at)}`;
+    up.title = new Date(state.data.generated_at).toLocaleString();
+    up.hidden = false;
   } catch (e) {
     view.innerHTML = `<div class="note"><b>The store could not load its app list.</b><br>${esc(e.message)}.
       <a href="${esc(reportLink("Store: data.json failed to load", "Error: " + e.message + "\nPage: " + location.href))}">Report this</a>.</div>`;
@@ -44,49 +65,72 @@ async function load() {
 // ---------------------------------------------------------------- list
 function renderList() {
   const apps = state.data.apps.filter((a) => a.active !== false || state.q);
-  const q = state.q.toLowerCase();
+  const counts = {};
+  apps.forEach((a) => { const k = maker(a); counts[k] = (counts[k] || 0) + 1; });
+  const makers = Object.keys(counts).sort((x, y) => (x === "Other") - (y === "Other") || counts[y] - counts[x] || x.localeCompare(y));
+  if (state.maker !== "all" && !counts[state.maker]) state.maker = "all";
+  view.innerHTML = `
+    <label class="search">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="search" id="q" placeholder="Search apps, packages, patch sources" value="${esc(state.q)}" aria-label="Search apps">
+    </label>
+    ${makers.length > 1 ? `<div class="chips" role="group" aria-label="Filter by app maker">
+      ${chip("all", "All apps")}${makers.map((k) => chip(k, k, counts[k])).join("")}</div>` : `<div class="chips"></div>`}
+    <p class="count-line" id="countline"></p>
+    <div id="results"></div>`;
+  const input = $("#q");
+  input.addEventListener("input", () => { state.q = input.value; renderResults(apps); });
+  view.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => {
+    state.maker = b.dataset.maker;
+    view.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", c === b));
+    renderResults(apps);
+  }));
+  renderResults(apps);
+}
+
+function chip(k, label, n) {
+  return `<button type="button" class="chip" data-maker="${esc(k)}" aria-pressed="${state.maker === k}">${esc(label)}${n ? `<span class="n">${n}</span>` : ""}</button>`;
+}
+
+function renderResults(apps) {
+  const q = state.q.trim().toLowerCase();
   const shown = apps.filter((a) => {
     const m = a.latest;
-    if (state.kind !== "all" && m.kind !== state.kind) return false;
-    return !q || [a.name, m.package, m.original_package, m.patches_source, m.category].join(" ").toLowerCase().includes(q);
+    if (state.maker !== "all" && maker(a) !== state.maker) return false;
+    return !q || [a.name, m.package, m.original_package, m.patches_source, m.category, maker(a)].join(" ").toLowerCase().includes(q);
   });
-  const chip = (k, label) => `<button class="chip" data-kind="${k}" aria-pressed="${state.kind === k}">${label}</button>`;
-  view.innerHTML = `
-    <div class="tools">
-      <input type="search" id="q" placeholder="Search apps, packages, patch sources" value="${esc(state.q)}" aria-label="Search">
-      <div class="chips">${chip("all", "All")}${chip("clone", "Clones")}${chip("standalone", "Standalone")}</div>
-    </div>
-    ${shown.length ? `<div class="grid">${shown.map(card).join("")}</div>`
-      : `<p class="empty">${state.data.apps.length ? "No apps match." : "No apps built yet. The first build runs automatically and they will show up here."}</p>`}`;
-  const input = $("#q");
-  input.addEventListener("input", () => { state.q = input.value; renderList(); $("#q").focus(); $("#q").setSelectionRange(9e9, 9e9); });
-  view.querySelectorAll(".chip").forEach((b) => b.addEventListener("click", () => { state.kind = b.dataset.kind; renderList(); }));
+  $("#countline").textContent = shown.length ? `Showing ${shown.length} ${shown.length === 1 ? "app" : "apps"}` : "";
+  $("#results").innerHTML = shown.length ? `<div class="grid">${shown.map(card).join("")}</div>`
+    : `<p class="empty">${state.data.apps.length ? "No apps match. Try a different name or clear the filter." : "No apps built yet. The first build runs automatically and they will show up here."}</p>`;
 }
+
+const fmtCount = (n) => n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n);
 
 function card(a) {
   const m = a.latest;
   return `<a class="card" href="#/app/${encodeURIComponent(a.id)}">
     ${icon(m.icon, a.name)}
-    <div><div class="name">${esc(a.name)} ${kindTag(m.kind)}</div>
-    <div class="sub">v${esc(m.version)} · ${mb(m.size)} · ${esc(m.patches_source.split("/")[0])}</div></div></a>`;
+    <div class="body"><div class="name">${esc(a.name)}${m.kind === "clone" ? "" : ` <span class="tag standalone" title="Replaces the original app">Standalone</span>`}</div>
+    <div class="sub">v${esc(m.version)} · ${mb(m.size)}</div></div>
+    <span class="dl" title="${a.downloads ?? 0} downloads"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12m-5-5 5 5 5-5M5 20h14"/></svg>${fmtCount(a.downloads ?? 0)}</span></a>`;
 }
 
 // ---------------------------------------------------------------- detail
 function patchList(title, items, open, hint) {
   if (!items?.length) return "";
   return `<details class="patches"${open ? " open" : ""}><summary>${title} <span class="count">(${items.length})</span></summary>
-    ${hint ? `<p class="muted" style="padding:0 14px">${hint}</p>` : ""}
+    ${hint ? `<p class="muted hint">${hint}</p>` : ""}
     <ul>${items.map((p) => `<li><b>${esc(p.name)}</b>${p.description ? `<span>${esc(p.description)}</span>` : ""}</li>`).join("")}</ul></details>`;
 }
 
 function renderApp(id) {
   const a = state.data.apps.find((x) => x.id === id);
-  if (!a) { view.innerHTML = `<a class="back" href="#/">← All apps</a><p class="empty">App not found.</p>`; return; }
+  if (!a) { view.innerHTML = `<div class="detail"><a class="back" href="#/">‹ All apps</a><p class="empty">This app is not in the store. It may have been removed.</p></div>`; return; }
   const m = a.latest;
   const p = m.patches || {};
   const fact = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
-  view.innerHTML = `
-    <a class="back" href="#/">← All apps</a>
+  view.innerHTML = `<div class="detail">
+    <a class="back" href="#/">‹ All apps</a>
     <section class="hero">
       ${icon(m.icon, a.name, true)}
       <div><h1>${esc(a.name)} ${kindTag(m.kind)}</h1>
@@ -120,10 +164,10 @@ function renderApp(id) {
     ${a.history?.length ? `<h2>Older builds</h2><div class="scroll"><table class="hist"><tr><th>Version</th><th>Patches</th><th>Built</th><th></th></tr>
       ${a.history.map((h) => `<tr><td>${esc(h.version)}</td><td>${esc(h.patches_version)}</td><td>${day(h.built_at)}</td>
         <td><a href="${esc(h.download_url)}">${mb(h.size)}</a></td></tr>`).join("")}</table></div>` : ""}
-    <p class="muted" style="margin-top:22px">
+    <p class="muted" style="margin-top:28px">
       <a href="${esc(m.release_url)}">Release page &amp; build log</a> ·
       <a href="${esc(reportLink(`${a.name}: problem with v${m.version}`, `App: ${a.id}\nVersion: ${m.version}\nPatches: ${m.patches_source} ${m.patches_version}\nRelease: ${m.release_url}\n\nWhat went wrong?\n`))}">Report a problem with this app</a>
-    </p>`;
+    </p></div>`;
   if (m.needs_microg) {
     $("#dl").addEventListener("click", () => setTimeout(() => $("#microg").showModal(), 300));
   }
@@ -184,7 +228,7 @@ async function bundlePackages(r) {
 }
 
 function renderAdd() {
-  view.innerHTML = `<div class="prose">
+  view.innerHTML = `<div class="add-wrap"><div class="prose">
     <h1>Add an app</h1>
     <p class="muted">Paste a patch source link and the app's package name. Check the preview, then submit. Only the store owner's requests are built; anyone else's are closed automatically.</p></div>
     <form class="add" id="addf" autocomplete="off">
@@ -202,7 +246,7 @@ function renderAdd() {
       <div class="pv dim"><span class="icon letter">?</span><div><b>App</b><div class="muted">YouTube · com.google.android.youtube</div></div></div>
     </div>
     <div class="row"><a class="btn" id="go" aria-disabled="true">Submit on GitHub</a></div>
-    <p class="muted">Submitting opens a pre-filled GitHub issue — press <b>Create</b> there. The build starts by itself and the app appears here when it is done.</p>`;
+    <p class="muted">Submitting opens a pre-filled GitHub issue — press <b>Create</b> there. The build starts by itself and the app appears here when it is done.</p></div>`;
   const src = $("#src"), pkg = $("#pkg"), nm = $("#nm"), kind = $("#kind"), pv = $("#pv"), go = $("#go");
   let timer, seq = 0;
   const update = () => { clearTimeout(timer); timer = setTimeout(preview, 250); };
@@ -260,7 +304,17 @@ function route() {
   else if (h === "add") renderAdd();
   else if (h === "about") renderAbout();
   else renderList();
+  document.querySelectorAll(".links a[href^='#/']").forEach((l) => {
+    if (l.getAttribute("href") === "#/" + h) l.setAttribute("aria-current", "page"); else l.removeAttribute("aria-current");
+  });
 }
+
+$("#theme").addEventListener("click", () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("theme", root.dataset.theme); } catch (_) { /* private mode */ }
+});
 
 window.addEventListener("error", (e) => {
   const link = $("#report");
@@ -270,6 +324,7 @@ window.addEventListener("error", (e) => {
 (async () => {
   $("#report").href = reportLink("Store problem", `Page: ${location.href}\n\nWhat went wrong?\n`);
   try { await load(); } catch (_) { return; }
+  $("#gh").href = `https://github.com/${repo()}`;
   const mg = state.data.microg || {};
   $("#microg-dl").href = mg.url || mg.page || "https://github.com/MorpheApp/MicroG-RE/releases/latest";
   window.addEventListener("hashchange", route);
